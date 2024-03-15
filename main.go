@@ -70,6 +70,81 @@ func login(c echo.Context) error {
 	}
 	return c.JSON(http.StatusOK, map[string]interface{}{"token": tokenString})
 }
+
+func discover(c echo.Context) error {
+	userIDStr := c.QueryParam("user_id")
+	userID, err := strconv.Atoi(userIDStr)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid user_id"})
+	}
+
+	rows, err := dbPool.Query(ctx, `
+		SELECT id, name, age, gender
+		FROM users
+		WHERE id != $1
+		AND id NOT IN (
+			SELECT swipee_id
+			FROM swipes
+			WHERE swiper_id = $1
+		)
+	`, userID)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to query users"})
+	}
+	defer rows.Close()
+
+	var users []map[string]interface{}
+	for rows.Next() {
+		var id int
+		var name string
+		var age int
+		var gender string
+		if err := rows.Scan(&id, &name, &age, &gender); err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to scan user data"})
+		}
+		user := map[string]interface{}{
+			"id":     id,
+			"name":   name,
+			"age":    age,
+			"gender": gender,
+		}
+		users = append(users, user)
+	}
+	if err := rows.Err(); err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Error iterating over user data"})
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{"results": users})
+}
+
+func swipe(c echo.Context) error {
+	swiperIDStr := c.FormValue("user_id")
+	swipeeIDStr := c.FormValue("swipee_id")
+	likedStr := c.FormValue("liked")
+
+	swiperID, err := strconv.Atoi(swiperIDStr)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid user_id"})
+	}
+	swipeeID, err := strconv.Atoi(swipeeIDStr)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid swipee_id"})
+	}
+	liked, err := strconv.ParseBool(likedStr)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid liked value"})
+	}
+
+	_, err = dbPool.Exec(ctx, `
+		INSERT INTO swipes (swiper_id, swipee_id, liked)
+		VALUES ($1, $2, $3)
+		ON CONFLICT DO UPDATE
+	`, swiperID, swipeeID, liked)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to swipe"})
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{"message": "Swiped successfully"})
 }
 
 var (
@@ -95,6 +170,17 @@ func main() {
 			password VARCHAR(255) NOT NULL,
 			gender VARCHAR(10) NOT NULL,
 			age integer NOT NULL
+		);
+	`)
+	if err != nil {
+		log.Fatal(err)
+	}
+	_, err := dbPool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS swipes (
+			swiper_id INT,
+			swipee_id INT,
+			liked BOOLEAN,
+			PRIMARY KEY (swiper_id, swipee_id)
 		);
 	`)
 	if err != nil {
