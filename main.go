@@ -3,7 +3,9 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/go-redis/redis/v8"
+	"log"
+	"math/rand/v2"
+
 	"github.com/labstack/echo/v4"
 	"net/http"
 )
@@ -24,29 +26,23 @@ func GetValidToken(tokenString string) (*jwt.Token, error) {
 }
 
 func createUser(c echo.Context) error {
-	userID, err := redisClient.Incr(ctx, "user_id").Result()
+	address := fmt.Sprintf("address%d@example.com", rand.Uint64())
+	row := dbPool.QueryRow(ctx, "INSERT INTO users (email, name, password, gender, age) VALUES ($1, $2, $3, $4, $5) RETURNING id",
+		address, "Example User", "password123", "male", 30)
+
+	var userID int
+	err := row.Scan(&userID)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to create user"})
 	}
 
-	user := User{
-		Email:    "user@example.com",
-		Name:     "John Doe",
-		Password: "password123",
-		Gender:   "male",
-		Age:      30,
-	}
-	key := fmt.Sprintf("user:%d", userID)
 	result := map[string]interface{}{
-		"email":    user.Email,
-		"name":     user.Name,
-		"password": user.Password,
-		"gender":   user.Gender,
-		"age":      user.Age,
-	}
-	err = redisClient.HMSet(ctx, key, result).Err()
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to create user"})
+		"id": userID,
+		"email":    address,
+		"name":     "Example User",
+		"password": "password123",
+		"gender":   "male",
+		"age":      30,
 	}
 
 	return c.JSON(http.StatusOK, map[string]interface{}{"result": result})
@@ -63,16 +59,32 @@ func login(c echo.Context) error {
 
 var (
 	ctx         = context.Background()
-	redisClient *redis.Client
-	tokenSecret = "36a4705a0d7759ff71a7e9c0cf788e4040897b689786caccc290e12b2e190dc3"
+	dbPool *pgxpool.Pool
+	tokenSecret = []byte("36a4705a0d7759ff71a7e9c0cf788e4040897b689786caccc290e12b2e190dc3")
 )
 
 func main() {
-	redisClient = redis.NewClient(&redis.Options{
-		Addr:     "localhost:6379",
-		Password: "",
-		DB:       0,
-	})
+	dsn := "postgresql://username:password@localhost:5432/dbname"
+	dbPool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer dbPool.Close()
+
+	// Create users table if it doesn't exist
+	_, err = dbPool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS users (
+			id integer PRIMARY KEY,
+			email VARCHAR(255) UNIQUE NOT NULL,
+			name VARCHAR(255) NOT NULL,
+			password VARCHAR(255) NOT NULL,
+			gender VARCHAR(10) NOT NULL,
+			age integer NOT NULL
+		);
+	`)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	e := echo.New()
 
