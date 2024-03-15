@@ -171,15 +171,10 @@ func main() {
 			gender VARCHAR(10) NOT NULL,
 			age integer NOT NULL
 		);
-	`)
-	if err != nil {
-		log.Fatal(err)
-	}
-	_, err := dbPool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS swipes (
-			swiper_id INT,
-			swipee_id INT,
-			liked BOOLEAN,
+			swiper_id INT NOT NULL,
+			swipee_id INT NOT NULL,
+			liked BOOLEAN NOT NULL,
 			PRIMARY KEY (swiper_id, swipee_id)
 		);
 	`)
