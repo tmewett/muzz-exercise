@@ -144,7 +144,25 @@ func swipe(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to swipe"})
 	}
 
-	return c.JSON(http.StatusOK, map[string]interface{}{"message": "Swiped successfully"})
+	isMatch := false
+	if liked {
+		err := dbPool.QueryRow(ctx, `
+			SELECT liked
+			FROM swipes
+			WHERE swiper_id = $1 AND swipee_id = $2
+		`, swipeeID, swiperID).Scan(&isMatch)
+		if err != nil && err != pgx.ErrNoRows {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to check previous like"})
+		}
+	}
+
+	results := map[string]interface{}{
+		"matched": isMatch,
+	}
+	if isMatch {
+		results["matchID"] = swipeeID
+	}
+	return c.JSON(http.StatusOK, map[string]interface{}{"results": results})}
 }
 
 var (
