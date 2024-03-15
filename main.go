@@ -78,16 +78,31 @@ func discover(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid user_id"})
 	}
 
+	minAgeStr := c.QueryParam("min_age")
+	minAge, err := strconv.Atoi(minAgeStr)
+	if err != nil {
+		minAge = 0 // Default to 0 if not provided
+	}
+
+	maxAgeStr := c.QueryParam("max_age")
+	maxAge, err := strconv.Atoi(maxAgeStr)
+	if err != nil {
+		maxAge = 999 // Default to a high value if not provided
+	}
+
+	genders := strings.Split(c.QueryParam("genders"), ",")
 	rows, err := dbPool.Query(ctx, `
 		SELECT id, name, age, gender
 		FROM users
 		WHERE id != $1
+		AND age >= $2 AND age <= $3
+		AND gender = ANY($4)
 		AND id NOT IN (
 			SELECT swipee_id
 			FROM swipes
 			WHERE swiper_id = $1
 		)
-	`, userID)
+	`, userID, minAge, maxAge, pq.Array(genders))
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to query users"})
 	}
