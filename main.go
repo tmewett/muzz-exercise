@@ -51,10 +51,25 @@ func createUser(c echo.Context) error {
 func login(c echo.Context) error {
 	email := c.FormValue("email")
 	password := c.FormValue("password")
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.Claims{
 
+	var userID int
+	err := dbPool.QueryRow(ctx, "SELECT id FROM users WHERE email = $1 AND password = $2", email, password).Scan(&userID)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return c.JSON(http.StatusUnauthorized, map[string]string{"error": "Invalid email or password"})
+		}
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to authenticate user"})
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.Claims{
+		Subject: strconv.Itoa(userID),
 	})
-	return c.JSON(http.StatusOK, map[string]interface{}{"token": })
+	tokenString, err := token.SignedString(tokenSecret)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to generate token"})
+	}
+	return c.JSON(http.StatusOK, map[string]interface{}{"token": tokenString})
+}
 }
 
 var (
