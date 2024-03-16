@@ -26,10 +26,14 @@ func GetValidToken(tokenString string) (*jwt.Token, error) {
 }
 
 func createUser(c echo.Context) error {
+	// Generate a random email address since they must be unique for login.
 	address := fmt.Sprintf("address%d@example.com", rand.Uint64())
-	row := dbPool.QueryRow(ctx, "INSERT INTO users (email, name, password, gender, age) VALUES ($1, $2, $3, $4, $5) RETURNING id",
-		address, "Example User", "password123", "male", 30)
+	// Generate a random location in (-100..100, -100..100).
+	x := rand.Float64()*200 - 100
+	y := rand.Float64()*200 - 100
 
+	row := dbPool.QueryRow(ctx, "INSERT INTO users (email, name, password, gender, age, location) VALUES ($1, $2, $3, $4, $5, ($6, $7)) RETURNING id",
+		address, "Example User", "password123", "male", 30, x, y)
 	var userID int
 	err := row.Scan(&userID)
 	if err != nil {
@@ -90,9 +94,15 @@ func discover(c echo.Context) error {
 		maxAge = 999 // Default to a high value if not provided
 	}
 
+	var userLocationX, userLocationY float64
+	err = dbPool.QueryRow(ctx, "SELECT location[0], location[1] FROM users WHERE id = $1", userID).Scan(&userLocationX, &userLocationY)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to get user's location"})
+	}
+
 	genders := strings.Split(c.QueryParam("genders"), ",")
 	rows, err := dbPool.Query(ctx, `
-		SELECT id, name, age, gender
+		SELECT id, name, age, gender, length(lseg(($5, $6), location)) AS distance
 		FROM users
 		WHERE id != $1
 		AND age >= $2 AND age <= $3
@@ -102,7 +112,8 @@ func discover(c echo.Context) error {
 			FROM swipes
 			WHERE swiper_id = $1
 		)
-	`, userID, minAge, maxAge, pq.Array(genders))
+		ORDER BY distance
+	`, userID, minAge, maxAge, pgx.Array(genders), userLocationX, userLocationY)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to query users"})
 	}
@@ -114,7 +125,8 @@ func discover(c echo.Context) error {
 		var name string
 		var age int
 		var gender string
-		if err := rows.Scan(&id, &name, &age, &gender); err != nil {
+		var distance float32
+		if err := rows.Scan(&id, &name, &age, &gender, &distance); err != nil {
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to scan user data"})
 		}
 		user := map[string]interface{}{
@@ -122,6 +134,7 @@ func discover(c echo.Context) error {
 			"name":   name,
 			"age":    age,
 			"gender": gender,
+			"distanceToMe": distance,
 		}
 		users = append(users, user)
 	}
@@ -177,7 +190,7 @@ func swipe(c echo.Context) error {
 	if isMatch {
 		results["matchID"] = swipeeID
 	}
-	return c.JSON(http.StatusOK, map[string]interface{}{"results": results})}
+	return c.JSON(http.StatusOK, map[string]interface{}{"results": results})
 }
 
 var (
@@ -202,7 +215,8 @@ func main() {
 			name VARCHAR(255) NOT NULL,
 			password VARCHAR(255) NOT NULL,
 			gender VARCHAR(10) NOT NULL,
-			age integer NOT NULL
+			age integer NOT NULL,
+			location point NOT NULL
 		);
 		CREATE TABLE IF NOT EXISTS swipes (
 			swiper_id INT NOT NULL,
