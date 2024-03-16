@@ -24,7 +24,7 @@ type User struct {
 }
 
 func GetValidToken(tokenString string) (*jwt.Token, error) {
-	p := jwt.NewParser(jwt.WithValidMethods("HS256"))
+	p := jwt.NewParser(jwt.WithValidMethods([]string{"HS256"}))
 	return p.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		return tokenSecret, nil
 	})
@@ -70,7 +70,7 @@ func login(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to authenticate user"})
 	}
 
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.Claims{
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.RegisteredClaims{
 		Subject: strconv.Itoa(userID),
 	})
 	tokenString, err := token.SignedString(tokenSecret)
