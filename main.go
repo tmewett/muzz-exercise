@@ -7,10 +7,10 @@ import (
 	"math/rand/v2"
 	"net/http"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
-	"github.com/golang-jwt/jwt/v5"
 )
 
 type User struct {
@@ -44,7 +44,7 @@ func createUser(c echo.Context) error {
 	}
 
 	result := map[string]interface{}{
-		"id": userID,
+		"id":       userID,
 		"email":    address,
 		"name":     "Example User",
 		"password": "password123",
@@ -133,10 +133,10 @@ func discover(c echo.Context) error {
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to scan user data"})
 		}
 		user := map[string]interface{}{
-			"id":     id,
-			"name":   name,
-			"age":    age,
-			"gender": gender,
+			"id":           id,
+			"name":         name,
+			"age":          age,
+			"gender":       gender,
 			"distanceToMe": distance,
 		}
 		users = append(users, user)
@@ -198,7 +198,7 @@ func swipe(c echo.Context) error {
 
 var (
 	ctx         = context.Background()
-	dbPool *pgxpool.Pool
+	dbPool      *pgxpool.Pool
 	tokenSecret = []byte("36a4705a0d7759ff71a7e9c0cf788e4040897b689786caccc290e12b2e190dc3")
 )
 
