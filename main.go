@@ -206,7 +206,8 @@ var (
 
 func main() {
 	dsn := "postgresql://username:password@localhost:5432/dbname"
-	dbPool, err := pgxpool.New(ctx, dsn)
+	dbPoolNew, err := pgxpool.New(ctx, dsn)
+	dbPool = dbPoolNew
 	if err != nil {
 		log.Fatal(err)
 	}
