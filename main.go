@@ -232,6 +232,8 @@ func main() {
 	e := echo.New()
 
 	e.POST("/user/create", createUser)
+	e.GET("/discover", discover)
+	e.POST("/swipe", swipe)
 
 	e.Logger.Fatal(e.Start("localhost:8080"))
 }
