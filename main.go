@@ -37,11 +37,12 @@ func createUser(c echo.Context) error {
 	x := rand.Float64()*200 - 100
 	y := rand.Float64()*200 - 100
 
-	row := dbPool.QueryRow(ctx, "INSERT INTO users (email, name, password, gender, age, location) VALUES ($1, $2, $3, $4, $5, ($6, $7)) RETURNING id",
+	row := dbPool.QueryRow(ctx, "INSERT INTO users (email, name, password, gender, age, location) VALUES ($1, $2, $3, $4, $5, point($6, $7)) RETURNING id",
 		address, "Example User", "password123", "male", 30, x, y)
 	var userID int
 	err := row.Scan(&userID)
 	if err != nil {
+		c.Logger().Error(err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to create user"})
 	}
 
@@ -107,7 +108,7 @@ func discover(c echo.Context) error {
 
 	genders := strings.Split(c.QueryParam("genders"), ",")
 	rows, err := dbPool.Query(ctx, `
-		SELECT id, name, age, gender, length(lseg(($5, $6), location)) AS distance
+		SELECT id, name, age, gender, length(lseg(point($5, $6), location)) AS distance
 		FROM users
 		WHERE id != $1
 		AND age >= $2 AND age <= $3
@@ -118,7 +119,7 @@ func discover(c echo.Context) error {
 			WHERE swiper_id = $1
 		)
 		ORDER BY distance
-	`, userID, minAge, maxAge, pgx.Array(genders), userLocationX, userLocationY)
+	`, userID, minAge, maxAge, genders, userLocationX, userLocationY)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Failed to query users"})
 	}
@@ -205,7 +206,7 @@ var (
 )
 
 func main() {
-	dsn := "postgresql://username:password@localhost:5432/dbname"
+	dsn := "postgresql://postgres:password@localhost:5432/postgres"
 	dbPoolNew, err := pgxpool.New(ctx, dsn)
 	dbPool = dbPoolNew
 	if err != nil {
@@ -216,7 +217,7 @@ func main() {
 	// Create users table if it doesn't exist
 	_, err = dbPool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS users (
-			id integer PRIMARY KEY,
+			id SERIAL PRIMARY KEY,
 			email VARCHAR(255) UNIQUE NOT NULL,
 			name VARCHAR(255) NOT NULL,
 			password VARCHAR(255) NOT NULL,
