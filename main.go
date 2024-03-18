@@ -23,13 +23,18 @@ type User struct {
 	Age      int    `json:"age"`
 }
 
+// GetValidToken attempts to decode the given JWT string and checks it was
+// validly signed by a previous call to /login. If successful it returns the
+// parsed Token.
 func GetValidToken(tokenString string) (*jwt.Token, error) {
 	p := jwt.NewParser(jwt.WithValidMethods([]string{"HS256"}))
+	// TODO Check token expiry.
 	return p.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		return tokenSecret, nil
 	})
 }
 
+// POST /user/create
 func createUser(c echo.Context) error {
 	// Generate a random email address since they must be unique for login.
 	address := fmt.Sprintf("address%d@example.com", rand.Uint64())
@@ -58,6 +63,10 @@ func createUser(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]interface{}{"result": result})
 }
 
+// POST /login
+// Form data email=...&password=...
+// Note: I used form data in all handlers so far just for quick convenience to demonstrate,
+// but it would be more suitable in a production system to use JSON.
 func login(c echo.Context) error {
 	email := c.FormValue("email")
 	password := c.FormValue("password")
@@ -73,6 +82,7 @@ func login(c echo.Context) error {
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.RegisteredClaims{
 		Subject: strconv.Itoa(userID),
+		// TODO include the issued-at field and test it in GetValidToken.
 	})
 	tokenString, err := token.SignedString(tokenSecret)
 	if err != nil {
@@ -81,12 +91,17 @@ func login(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]interface{}{"token": tokenString})
 }
 
+// GET /discover?user_id=...&genders=g1,g2,...[&min_age=n][&max_age=n]
+// Get a list of profiles which haven't been swiped by the given user. Must be authenticated.
+// genders is a comma-separated list of strings to be included.
 func discover(c echo.Context) error {
 	userIDStr := c.QueryParam("user_id")
 	userID, err := strconv.Atoi(userIDStr)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid user_id"})
 	}
+	// TODO Call GetValidToken with the JWT included in the request and check
+	// its subject is the user_id.
 
 	minAgeStr := c.QueryParam("min_age")
 	minAge, err := strconv.Atoi(minAgeStr)
@@ -107,6 +122,13 @@ func discover(c echo.Context) error {
 	}
 
 	genders := strings.Split(c.QueryParam("genders"), ",")
+
+	// Here I'm using the PostgreSQL geometry types to do the distance sorting
+	// in the actual query, for performance reasons. If there were a large
+	// number of users this means we wouldn't have to read every single one into
+	// memory and sort them there. (An alternative approach might be to use a
+	// regional bucketing system, so we only have to read from nearby
+	// "buckets".)
 	rows, err := dbPool.Query(ctx, `
 		SELECT id, name, age, gender, length(lseg(point($5, $6), location)) AS distance
 		FROM users
@@ -151,8 +173,15 @@ func discover(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]interface{}{"results": users})
 }
 
+// POST /swipe
+// Form data user_id=...&swipee_id=...&liked=true|false
+// Saves that the given user swiped on swipee and whether it was a like or pass.
 func swipe(c echo.Context) error {
 	swiperIDStr := c.FormValue("user_id")
+
+	// TODO Call GetValidToken with the JWT included in the request and check
+	// its subject is the user_id.
+
 	swipeeIDStr := c.FormValue("swipee_id")
 	likedStr := c.FormValue("liked")
 
@@ -180,6 +209,11 @@ func swipe(c echo.Context) error {
 
 	isMatch := false
 	if liked {
+		// Check the reverse connection to see if there's a match. Note that
+		// it's possible for two users to both swipe each other at the same time
+		// and both get match notifications, since the inserts and reads may be
+		// interleaved like I1,I2,R1,R2. If this is undesirable it can be fixed
+		// with a transaction.
 		err := dbPool.QueryRow(ctx, `
 			SELECT liked
 			FROM swipes
@@ -206,7 +240,12 @@ var (
 )
 
 func main() {
+	// This, and the signing secret above, should of course be loaded with some
+	// kind of configuration management when deployed.
 	dsn := "postgresql://postgres:password@localhost:5432/postgres"
+
+	// Save pool to a new variable and then copy into global dbPool, or else
+	// we'll shadow it due to the `:=`
 	dbPoolNew, err := pgxpool.New(ctx, dsn)
 	dbPool = dbPoolNew
 	if err != nil {
@@ -214,7 +253,7 @@ func main() {
 	}
 	defer dbPool.Close()
 
-	// Create users table if it doesn't exist
+	// Create tables if they don't exist.
 	_, err = dbPool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS users (
 			id SERIAL PRIMARY KEY,
